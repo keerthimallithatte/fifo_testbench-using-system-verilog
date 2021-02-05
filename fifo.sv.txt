@@ -1,0 +1,667 @@
+// Code your testbench here
+// or browse Examples
+
+`include "test.sv"
+
+module tb;
+  
+  
+  test t;
+  bit clk;
+  bit rst;
+  
+  
+  fifo_intfwt intfwt(clk,rst);
+  fifo_intfrd intfrd(clk,rst);
+  
+  fifo DUT(.clk(intfwt.clk), 
+           .rst(intfwt.rst),  
+           .wr_en(intfwt.wr_en),
+           .wdata(intfwt.wdata),
+           .full(intfwt.full),
+           .rd_en(intfrd.rd_en),
+           .rdata(intfrd.rdata),
+           .empty(intfrd.empty)
+           );
+  
+ initial #5000ns $finish;
+  
+  initial forever
+    #5ns clk = ~clk;
+  
+  initial begin
+    rst = 1;
+    #24ns rst = 0;
+  end
+  
+  initial begin
+  
+    t = new(intfwt,intfrd);
+    t.run();
+    
+  end
+  
+  
+  
+  
+  
+endmodule
+
+
+
+
+
+
+
+
+
+
+ `include "env.sv"
+
+class test;
+ 
+  
+  env e;
+  
+  function new(virtual fifo_intfwt intfwt, virtual fifo_intfrd intfrd);
+    
+    e = new(intfwt,intfrd);
+    
+  endfunction
+  
+  
+  
+  task run();
+    
+    $display("i am in test");
+    e.run();
+    
+  endtask
+  
+  
+endclass
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  `include "generatorwt.sv"
+`include "driverwt.sv"
+`include "monitorwt.sv"
+`include "generatorrd.sv"
+`include "driverrd.sv"
+`include "monitorrd.sv"
+`include "scorebrdrdwt.sv"
+
+ 
+class env;
+  
+ 
+  mailbox #(seq_itmwt) mbox1;
+  mailbox #(seq_itmwt) mbox2;
+  
+  
+  mailbox #(seq_itmrd) mbox3;
+  mailbox #(seq_itmrd) mbox4;
+  
+ 
+  
+  generatorwt w_gen;
+  driverwt w_dri;
+  monitorwt w_mon;
+  
+  scorebrdrdwt sb;
+  
+  monitorrd r_mon;
+  generatorrd r_gen;
+  driverrd r_dri;
+ 
+ 
+  
+  
+  
+  function new(virtual fifo_intfwt intfwt , virtual fifo_intfrd intfrd);
+    
+    mbox1 = new();
+    mbox2 = new();
+    mbox3 = new();
+    mbox4 = new();
+    
+    w_gen = new();
+    w_dri = new(intfwt);
+    w_mon =  new(intfwt);
+    
+    sb = new();
+    
+    r_gen  =new();
+    r_mon =new(intfrd);
+    r_dri = new(intfrd);
+   
+    
+   
+    
+    
+    
+    w_gen.mbox = mbox1;
+    w_dri.mbox = mbox1;
+    w_mon.mbox = mbox2;
+    
+    sb.mbox_wr = mbox2;
+    sb.mbox_rd = mbox3;
+    
+    r_mon.mbox = mbox3;
+    r_gen.mbox = mbox4;
+    r_dri.mbox = mbox4;
+    
+    
+   
+    
+    
+  endfunction
+  
+  task run();
+    
+    $display("i am in environment");
+    
+    fork
+    w_gen.run();
+    w_dri.run();
+    w_mon.run();
+    sb.run();
+    r_mon.run();
+    r_gen.run();
+    r_dri.run();
+     
+    join
+    
+  endtask
+  
+endclass
+
+
+
+
+
+
+
+
+
+class seq_itmwt;
+  
+  rand bit [7:0] wdata;
+  bit wr_en;
+  
+endclass
+
+class generatorwt;
+  
+  seq_itmwt sq_tmwt;
+  
+  mailbox #(seq_itmwt) mbox;
+  
+  
+  task run();
+    $display("i am in generator write");
+    
+    for(int i=0;i<30;i++)
+      
+      begin
+
+      
+        sq_tmwt = new();
+        
+        sq_tmwt.randomize() with {wdata >=10 ; wdata <=100 ;};
+        
+        mbox.put(sq_tmwt);
+        
+        
+      end
+   
+    
+   
+  endtask
+  
+   
+  
+endclass
+
+
+
+
+
+
+
+class driverwt;
+ 
+  
+  bit valid;
+  
+  seq_itmwt sq_tmwt;
+  
+  mailbox #(seq_itmwt) mbox;
+  
+  virtual fifo_intfwt intfwt;
+  
+  
+  
+  function new(virtual fifo_intfwt intfwt);
+    
+    this.intfwt =  intfwt;
+    
+  endfunction
+  
+  
+  task run();
+    
+    $display("i am in driver write");  
+    
+    
+    intfwt.d_c.wr_en <= 1'b0;
+    intfwt.d_c.wdata <= 8'b0;
+
+    forever begin
+      
+      
+       fork 
+         
+         begin
+           
+           @(posedge intfwt.clk)
+           intfwt.d_c.wr_en <= 1'b0;
+           valid = 0;
+           
+         end 
+         
+         begin 
+           
+           mbox.get(sq_tmwt);
+           valid = 1;
+   
+         end 
+         
+       join_any
+      
+      
+     disable fork;
+      
+       
+      wait(intfwt.rst == 1'b0);
+      
+      do
+        
+        begin 
+          
+          @intfwt.d_c;
+          intfwt.d_c.wr_en <= 1'b0;
+          
+        end
+      
+      while(intfwt.d_c.full == 1'b1);
+      
+      
+      
+      @intfwt.d_c;
+      
+      if(valid == 1)
+        
+        begin
+          
+          intfwt.d_c.wr_en <= 1'b1;
+          intfwt.d_c.wdata <= sq_tmwt.wdata;
+      
+        end       
+      
+    end
+         
+    
+  endtask
+       
+  
+endclass
+
+
+
+
+
+
+
+
+
+
+
+class monitorwt;
+  
+  
+  seq_itmwt sq_tmwt;
+  
+  mailbox #(seq_itmwt) mbox;
+  
+  virtual fifo_intfwt intfwt;
+  
+  function new(virtual fifo_intfwt intfwt);
+    
+    this.intfwt = intfwt;
+    
+  endfunction
+  
+  task run();
+    
+    $display("i am in monitor write");
+    
+    forever begin
+      
+      @intfwt.m_c;
+       
+      if( (intfwt.rst == 1'b0) && 
+         (intfwt.m_c.wr_en == 1'b1) )
+      
+      begin
+      
+   
+        sq_tmwt = new();
+        sq_tmwt.wdata = intfwt.m_c.wdata;
+        mbox.put(sq_tmwt);   
+        
+      end
+      
+    end
+    
+    
+  endtask
+  
+  
+  
+endclass
+
+
+
+
+
+
+
+class scorebrdrdwt;
+
+  seq_itmwt sq_tmwt ;
+  seq_itmrd sq_tmrd ;
+  
+ 
+ 
+  mailbox #(seq_itmwt) mbox_wr;
+  mailbox #(seq_itmrd) mbox_rd;
+ 
+  
+   
+  int write_queue[$];
+  int read_queue[$];
+  
+  
+  
+  
+  
+  task write_collect();
+    
+    forever
+      
+      begin
+        
+        mbox_wr.get(sq_tmwt);
+        write_queue.push_back(sq_tmwt.wdata); 
+        
+      end
+    
+  endtask
+  
+  
+  
+  
+  task read_collect();
+    
+    forever
+      
+      begin
+        
+        mbox_rd.get(sq_tmrd);
+        read_queue.push_back(sq_tmrd.rdata);
+     
+      end
+    
+  endtask
+  
+  
+  
+  
+  
+  task compare();
+    
+     seq_itmrd sq_comparerd;
+     seq_itmwt sq_comparewt;
+    
+    forever 
+      
+      begin
+    
+      
+      wait(read_queue.size() > 0);
+      wait(write_queue.size() > 0);
+    
+        
+     sq_comparewt = new();
+     sq_comparewt.wdata = write_queue.pop_front();
+        
+     sq_comparerd = new();
+     sq_comparerd.rdata = read_queue.pop_front();
+        
+        //$display("write data compare is %0d",sq_comparewt.wdata);
+        //$display("read data compare is %0d",sq_comparerd.rdata);
+    
+     if(sq_comparewt.wdata == sq_comparerd.rdata)
+
+      $display("output matched :: W_data %d R_data %d",sq_comparewt.wdata,sq_comparerd.rdata);
+
+    else
+      
+      $display("output mismatched:: W_data %d R_data %d",sq_comparewt.wdata,sq_comparerd.rdata);
+        
+    end
+    
+  endtask
+  
+   
+  task run();
+    $display("i am in scorebrd");
+  
+    fork 
+      
+      
+      write_collect();
+      read_collect();
+      compare();
+      
+    join
+    
+  endtask
+  
+endclass
+
+
+
+
+
+
+
+
+
+
+class seq_itmrd;
+  
+  rand bit [7:0] rdata;
+  bit rd_en;
+  
+endclass
+
+class generatorrd;
+  
+  seq_itmrd sq_tmrd;
+  
+  mailbox #(seq_itmrd) mbox;
+  
+  task run();
+    $display("i am in generator READ");
+    for(int i=0;i<30;i++)
+      
+      begin
+        
+        sq_tmrd = new();
+        mbox.put(sq_tmrd);
+        
+      end
+    
+    
+    
+  endtask
+  
+  
+endclass
+
+
+
+
+
+
+
+class driverrd;
+ 
+  
+  seq_itmrd sq_tmrd;
+  
+  mailbox #(seq_itmrd) mbox;
+  
+  
+  bit valid;
+  
+  
+  virtual fifo_intfrd intfrd;
+  
+  
+  function new(virtual fifo_intfrd intfrd);
+    
+    this.intfrd =  intfrd;
+    
+  endfunction
+  
+  
+  
+  task run();
+    
+    $display("i am in driver read");
+ 
+    intfrd.d_c.rd_en <= 1'b0;
+
+    forever begin
+      
+      
+      
+       fork 
+         begin
+           @intfrd.d_c;
+           intfrd.d_c.rd_en <= 1'b0;
+           valid = 0;
+           
+         end 
+         
+         begin 
+           mbox.get(sq_tmrd);
+           valid = 1;
+         end 
+       join_any
+      
+      disable fork;
+             	
+       
+      
+      
+      wait(intfrd.rst == 1'b0);
+      
+      do
+        begin 
+          @(intfrd.d_c);
+          intfrd.d_c.rd_en <= 1'b0;
+          
+        end
+      
+      while(intfrd.d_c.empty == 1'b1);
+      
+      
+      
+      @(intfrd.d_c);
+      
+      if(valid == 1)
+        
+        begin
+          intfrd.d_c.rd_en <= 1'b1;
+        end    
+      
+      
+      
+    end
+    
+  endtask
+  
+endclass
+
+
+
+
+
+
+
+class monitorrd;
+  
+  seq_itmrd sq_tmrd;
+  
+  mailbox #(seq_itmrd) mbox;
+  
+  virtual fifo_intfrd intfrd;
+  
+  function new(virtual fifo_intfrd intfrd);
+    
+    this.intfrd = intfrd;
+    
+  endfunction
+  
+  task run();
+    
+    $display("i am in monitor read");
+    
+    forever begin
+      
+      
+      
+      @intfrd.m_c;
+      
+      if( (intfrd.rst == 1'b0) && 
+         (intfrd.m_c.rd_en == 1'b1) )
+        
+        
+        
+        begin
+          
+          sq_tmrd = new();
+          sq_tmrd.rdata = intfrd.m_c.rdata;
+          mbox.put(sq_tmrd);
+          
+        end
+      
+      
+      
+   
+    end
+    
+  endtask
+  
+endclass
